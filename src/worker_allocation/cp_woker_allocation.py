@@ -275,7 +275,7 @@ def main(line_data: list[dict], worker_specific_data: dict, worker_availabilitie
             line_required_worker_offset = model.new_int_var(-required_workers, n_workers, var_name)
 
             # model.Add(line_required_worker_offset == sum(entry['w_line_interval']) - required_workers)
-            # model.add_min_equality(line_required_worker_offset, [0, sum(entry['w_line_interval']) - required_workers])
+            model.add_min_equality(line_required_worker_offset, [0, sum(entry['w_line_interval']) - required_workers])
 
             # add staffing to cost instead of hard constraint, so that the model can still be solved
             cp_line_staff_variables[(interval_start, interval_end, line_name)] = line_required_worker_offset
@@ -378,7 +378,7 @@ if __name__ == '__main__':
     line_allocation_with_geometry_and_required_workers = extend_line_allocation_with_geometry_and_required_workers(
         line_allocation_from_previous_step)
 
-    log.debug(
+    log.info(
         f"line_allocation_with_geometry_and_required_workers: {pprint.pformat(line_allocation_with_geometry_and_required_workers)}")
 
     worker_availabilities = [
@@ -1057,3 +1057,6 @@ if __name__ == '__main__':
         line_data=line_allocation_with_geometry_and_required_workers,
         worker_specific_data=worker_specific_data,
         worker_availabilities=worker_availabilities)
+
+    df = pandas.DataFrame(line_allocation_with_geometry_and_required_workers)
+    print(df.head(n=30))

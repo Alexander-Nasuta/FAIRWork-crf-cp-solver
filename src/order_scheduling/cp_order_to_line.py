@@ -99,7 +99,7 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
     for order in orders:
         for alternative in order:
             line_set.add(alternative[1])
-    n_machines = len(line_set) # used for gantt chart
+    n_machines = len(line_set)  # used for gantt chart
 
     # Global storage of variables.
     intervals_per_resources = collections.defaultdict(list)
@@ -109,7 +109,7 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
     presences = {}  # indexed by (order_idx, alternative_idx).
     order_ends = {}  # indexed by (order_idx).
 
-    priority_stars = []
+    priority_starts = []
     non_priority_starts = []
 
     # create alternative allocation intervals for each order
@@ -126,7 +126,7 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
         # handle priority and non-priority starts
         order_is_priority = order[0][2] == 1  # index 2 is the priority
         if order_is_priority:
-            priority_stars.append(order_start)
+            priority_starts.append(order_start)
         else:
             non_priority_starts.append(order_start)
 
@@ -141,7 +141,6 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
             alt_presence = model.new_bool_var(f"presence_{suffix_str}")
             alt_start = model.new_int_var(0, horizon, f"start_{suffix_str}")
             alt_end = model.new_int_var(0, horizon, f"end_{suffix_str}")
-            alt_due_date = model.new_int_var(0, horizon, f"due_date_{suffix_str}")
 
             alt_interval = model.new_optional_interval_var(
                 alt_start, _duration, alt_end, alt_presence, f"interval_{suffix_str}"
@@ -156,15 +155,16 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
             model.add(order_start == alt_start).only_enforce_if(alt_presence)
             model.add(order_tardiness == alt_task_tardiness).only_enforce_if(alt_presence)
 
-            # group all alternative presences for an order in a list to enforce only one alternative after the loop
-            order_line_allocation_presences.append(alt_presence)
-
             # Add the local interval to the right machine.
             intervals_per_resources[_line_id].append(alt_interval)
 
             # Add to presences
             presences[(order_idx, _line_id)] = alt_presence
             starts_order_line[(order_idx, _line_id)] = alt_start
+
+            # group all alternative presences for an order in a list
+            # to enforce only one alternative after the loop
+            order_line_allocation_presences.append(alt_presence)
 
         # only one alternative/ one allocation can be selected
         model.add_exactly_one(order_line_allocation_presences)
@@ -174,8 +174,10 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
     for line_id, line_intervals in intervals_per_resources.items():
         model.add_no_overlap(line_intervals)
 
+    # todo: do the priority constrain machine/line wise
+
     # priority starts before non-priority constraints
-    for priority_start in priority_stars:
+    for priority_start in priority_starts:
         for non_priority_start in non_priority_starts:
             model.add(priority_start <= non_priority_start)
 
@@ -192,7 +194,7 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
     model.add(total_tardiness == sum(tradiness[order_idx] for order_idx in range(len(orders))))
 
     # defining a variable for the objective function
-    # minimize makespan and tardiness weighted by 1:1
+    # minimize makespan and tardiness weighted by 1:1 by default
     objective_var = model.new_int_var(0, horizon * len(orders), "objective")
     model.add(objective_var == makespan_weight * makespan + tardiness_weight * total_tardiness)
     log.info(f"Cost function: cost = {makespan_weight} * makespan + {tardiness_weight} * total_tardiness")
