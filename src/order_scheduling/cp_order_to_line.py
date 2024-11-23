@@ -1,3 +1,5 @@
+from typing import List, Any
+
 import pandas
 
 from utils.logger import log
@@ -76,7 +78,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         self.__solution_count += 1
 
 
-def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int = 16) -> pandas.DataFrame:
+def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int = 16,  order_list: List[Any] = None) -> pandas.DataFrame:
     log.info("Running main function")
     log.info(f"makespan_weight: {makespan_weight}, tardiness_weight: {tardiness_weight}")
 
@@ -85,7 +87,7 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
 
     # 'orders' can be calculated from data in the database
     # using EXAMPLE_ORDER_INSTANCE for now
-    orders = EXAMPLE_ORDER_INSTANCE
+    orders = order_list
 
     # calculate horizon
     # for each oder add up the duration of the longest alternative
@@ -265,6 +267,6 @@ Remaining hours in the last day: {remaining_hours}
 
 
 if __name__ == '__main__':
-    solution_df = main()
+    solution_df = main(order_list=EXAMPLE_ORDER_INSTANCE)
     print(solution_df.head(n=30))
     solution_dict = solution_df.to_dict(orient='records')
