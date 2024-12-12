@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 
 from order_scheduling.cp_order_to_line import main
+from worker_allocation.cp_woker_allocation import main_allocation
+from worker_allocation.cp_woker_allocation import extend_line_allocation_with_geometry_and_required_workers
 
 app = Flask(__name__)
 api = Api(app, version="1.0.0", title="Example API",
@@ -111,7 +113,7 @@ class WorkerAssignment(Resource):
             if order['order'] not in order_dict:
                 order_dict[order['order']] = []
             priority = 0
-            if not order['priority']:
+            if order['priority'] == 'false':
                 priority = 1
             deadline_timestamp = int(
                 time.mktime(datetime.strptime(order["deadline"], "%Y-%m-%d").timetuple())
@@ -141,10 +143,130 @@ class WorkerAssignment(Resource):
         solution_df = main(order_list=order_list)
         print(solution_df.head(n=30))
         solution_dict = solution_df.to_dict(orient='records')
+        order_to_line = solution_dict
         print(order_list)
+        worker_specific_data = {}
+        human_factor = data.get('human_factor')
+        worker_list = []
+        for factor in human_factor:
+            worker_list.append(factor['worker'])
+        index = 1
+        for worker in worker_list:
+            if index not in worker_specific_data:
+                worker_specific_data[index] = {}
+            for factor in human_factor:
+                if worker == factor['worker']:
+                    worker_specific_data[index][factor['geometry']] = {}
+                    medical_condition = True
+                    if factor['medical_condition'] == 'false':
+                        medical_condition = False
+                    new_data = {
+                        "experience": factor['experience'],
+                        "preference": factor['preference'],
+                        "resilience": factor['resilience'],
+                        "medical-condition": medical_condition
+                    }
+                    worker_specific_data[index][factor['geometry']] = new_data
+            index = index + 1
+        print(order_list)
+        order_details = {}
+        order_list = data.get('order_data')
+        order_dicts = {}
+        temp = 0
+
+        for order in order_list:
+            if order['order'] not in order_dicts:
+                order_dicts[order['order']] = temp
+                temp = temp + 1
+            order_val = "Order " + str(order_dicts[order['order']])
+            if order_val not in order_details:
+                order_details[order_val] = []
+            order_details[order_val].append(order['geometry'])
+
+        worker_availabilities = [
+            # first shift
+            {'Worker_id': 1, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        ]
+        geometry_worker_count = {}
+        geometry_line = data.get('geometry_line_mapping')
+
+        for items in geometry_line:
+            geometry_worker_count[items['geometry']] = items['number_of_workers']
+
+        required_workers_mapping = {}
+        throughput_mapping_lists = data.get('throughput_mapping')
+        for items in throughput_mapping_lists:
+            if items['line'] not in required_workers_mapping:
+                required_workers_mapping[items['line']] = {}
+            geometry_val = {items['geometry']: geometry_worker_count[items['geometry']]}
+            required_workers_mapping[items['line']].update(geometry_val)
+
+        line_mapping = {}
+        temp_required_workers_mapping = {}
+        temp = 0
+        for key, value in required_workers_mapping.items():
+            temp_line = "Line " + str(temp)
+            temp = temp + 1
+            temp_required_workers_mapping[temp_line] = value
+            line_mapping[temp_line] = key
+        required_workers_mapping = temp_required_workers_mapping
+        availabilities = data.get('availabilities')
+        worker_availabilities = []
+
+        for availability in availabilities:
+            worker_id = availability["worker"].split()[-1]  # Extract worker ID (assuming format "worker <id>")
+            from_timestamp = start_time_timestamp + availability["from_timestamp"]
+            end_timestamp = start_time_timestamp + availability["end_timestamp"]
+
+            # Calculate relative times in hours, rounded up
+            from_relative = math.floor((from_timestamp - start_time_timestamp) / 3600)
+            end_relative = math.ceil((end_timestamp - start_time_timestamp) / 3600)
+
+            # Ensure values are natural numbers
+            from_relative = max(0, from_relative)
+            end_relative = max(0, end_relative)
+
+            # Append worker availability as tuple
+            worker_availabilities.append({
+                "Worker_id": int(worker_id),
+                "availability": [(from_relative, end_relative)]
+            })
+        line_allocation = []
+        for order in order_to_line:
+            geo_list = order_details[order['Task']]
+            for geo in geo_list:
+                temp_order = order
+                temp_order['geometry'] = geo
+                temp_order['required_workers'] = required_workers_mapping[order['Resource']][temp_order['geometry']]
+                line_allocation.append(temp_order)
+
+        #    order['required_workers'] = required_workers_mapping[order['Resource']][order['geometry']]
+        #line_allocation_with_geometry_and_required_workers = extend_line_allocation_with_geometry_and_required_workers(
+        #    order_to_line)
+        worker_availabilities = [
+            # first shift
+            {'Worker_id': 1, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        ]
+        allocation_list = main_allocation(
+                line_data=line_allocation,
+                worker_specific_data=worker_specific_data,
+                worker_availabilities=worker_availabilities)
+        for items in line_allocation:
+            if items['Resource'] in allocation_list:
+                temp_worker_allocation_data = allocation_list[items['Resource']]
+                worker_allocation_data = []
+                for i in temp_worker_allocation_data:
+                    worker_allocation_data.append(i + 100000)
+                items['workers'] = worker_allocation_data
+            else:
+                items['workers'] = []
+
+        for items in line_allocation:
+            items['Resource'] = line_mapping[items['Resource']]
+
         return {
             "message": "Successfully performed worker allocation operation.",
-            "solution": solution_dict  # Include solution_dict in the response
+            "solution": line_allocation  # Include solution_dict in the response
         }, 200
 
 

@@ -1,4 +1,5 @@
 import pprint
+from typing import List, Any, Dict
 
 import pandas
 
@@ -30,7 +31,7 @@ def is_interval_included(target_interval, interval_list):
 
 def extend_line_allocation_with_geometry_and_required_workers(line_allocation: list) -> list[dict]:
     order_details = {
-        "Order 0": {"geometry": "geo3"},
+        "Order 0": {"geometry": "geo1"},
         "Order 1": {"geometry": "geo2"},
         "Order 2": {"geometry": "geo5"},
         "Order 3": {"geometry": "geo1"},
@@ -86,9 +87,9 @@ def extend_line_allocation_with_geometry_and_required_workers(line_allocation: l
     return line_allocation
 
 
-def main(line_data: list[dict], worker_specific_data: dict, worker_availabilities: list[dict],
+def main_allocation(line_data: list[dict], worker_specific_data: dict, worker_availabilities: list[dict],
          preference_weight: int = 1, experience_weight: int = 1, resistance_weight: int = 1,
-         staffing_weight: int = 1) -> None:
+         staffing_weight: int = 1) -> dict[str, list[Any]]:
     model = cp_model.CpModel()
 
     makespan = max([order['Finish'] for order in line_data])
@@ -310,11 +311,11 @@ def main(line_data: list[dict], worker_specific_data: dict, worker_availabilitie
     # Solve model.
     solver = cp_model.CpSolver()
     status = solver.solve(model)
-
+    workers_list = {}
     # return if no solution was found
     if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
         log.info("No solution found")
-        return
+        return workers_list
 
     # iterate over cp_variable_store to get the results
     for key_tuple, val_tuple in cp_variable_store.items():
@@ -325,6 +326,9 @@ def main(line_data: list[dict], worker_specific_data: dict, worker_availabilitie
         if solver.Value(w_allocation) != -1:
             line_cp_id = solver.Value(w_allocation)
             line_name = lines_names_of_cp_ids[line_cp_id]
+            if line_name not in workers_list:
+                workers_list[line_name] = []
+            workers_list[line_name].append(worker_id)
             log.info(
                 f"[{interval_start}-{interval_end}] Worker {worker_id} is assigned to line {line_cp_id} ('{line_name}')")
         else:
@@ -342,6 +346,7 @@ Total experience: {solver.Value(total_experience)}
 Total resilience: {solver.Value(total_resilience)}
 
     """)
+    return workers_list
 
 
 if __name__ == '__main__':
@@ -1053,7 +1058,7 @@ if __name__ == '__main__':
         },
     }
 
-    main(
+    worker_list = main_allocation(
         line_data=line_allocation_with_geometry_and_required_workers,
         worker_specific_data=worker_specific_data,
         worker_availabilities=worker_availabilities)
