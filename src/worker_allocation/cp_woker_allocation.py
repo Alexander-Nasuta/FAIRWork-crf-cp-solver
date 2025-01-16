@@ -239,10 +239,15 @@ def main_allocation(line_data: list[dict], worker_specific_data: dict, worker_av
                 # look up the resilience, preference and experience of the worker for the geometry of the line
                 worker_specific_data_for_worker = worker_specific_data[worker_id]
                 interval_length = interval_end - interval_start
-                resilience = int(worker_specific_data_for_worker[geometry]['resilience'] * 100) * interval_length
-                preference = int(worker_specific_data_for_worker[geometry]['preference'] * 100) * interval_length
-                experience = int(worker_specific_data_for_worker[geometry]['experience'] * 100) * interval_length
 
+                try:
+                    resilience = int(worker_specific_data_for_worker[geometry]['resilience'] * 100) * interval_length
+                    preference = int(worker_specific_data_for_worker[geometry]['preference'] * 100) * interval_length
+                    experience = int(worker_specific_data_for_worker[geometry]['experience'] * 100) * interval_length
+                except KeyError:
+                    resilience = 0
+                    preference = 0
+                    experience = 0
                 # set the resilience, preference and experience variables to the values of the worker
                 # if the worker is assigned to the line
                 model.Add(w_resilience == resilience).only_enforce_if(w_line_interval)
@@ -256,7 +261,10 @@ def main_allocation(line_data: list[dict], worker_specific_data: dict, worker_av
                 # check the medical condition of the worker
                 # if it is false the worker is not allowed to work on the line
                 # for the cp program this means that w_line_interval is enforced to be 0
-                if not worker_specific_data_for_worker[geometry]['medical-condition']:
+                try:
+                    if not worker_specific_data_for_worker[geometry]['medical-condition']:
+                        model.Add(w_line_interval == 0)
+                except KeyError:
                     model.Add(w_line_interval == 0)
 
             # enforce that only one of the assignment_possibilities can be 1

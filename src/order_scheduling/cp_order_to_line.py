@@ -92,7 +92,7 @@ def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int
     # calculate horizon
     # for each oder add up the duration of the longest alternative
     horizon = sum(
-        max(task_tuple[0] for task_tuple in order_alternatives_list)  # index 0 is the duration
+        max((task_tuple[0] for task_tuple in order_alternatives_list), default=0)  # index 0 is the duration
         for order_alternatives_list in orders
     )
     log.debug(f"Horizon = {horizon}")
@@ -222,8 +222,14 @@ Cost: {solver.Value(objective_var)} (measures the quality of the solution)
     log.info(f"Gantt chart (time window: 0-{makespan})")
     gantt_data = []
     for orders_idx, order_alternatives_list in enumerate(orders):
-        line_idx = \
-            [line_id for _, line_id, *_ in order_alternatives_list if solver.Value(presences[(orders_idx, line_id)])][0]
+        try:
+            line_idx = [
+                line_id for _, line_id, *_ in order_alternatives_list
+                if solver.Value(presences[(orders_idx, line_id)])
+            ][0]
+        except IndexError:
+            # Fallback to 0 if the list is empty
+            line_idx = next((line_id for _, line_id, *_ in order_alternatives_list), 0)
         gantt_data.append({
             'Task': f'Order {orders_idx}',
             'Start': solver.Value(starts_order[orders_idx]),
