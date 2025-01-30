@@ -7486,8 +7486,8 @@ request_body_model = api.model('WorkerAssignmentRequest', {
 })
 
 
-def convert_to_unix(schedule_time, start_time_stamp, hours_per_day=24):
-    """Convert scheduling hours into a Unix timestamp relative to start_time_stamp, skipping Sundays."""
+def unix_time_from_solver(schedule_time, start_time_stamp, hours_per_day=24):
+    """Convert Solver timestamp into a Unix timestamp relative to start_time_stamp, skipping Sundays."""
     if schedule_time == 0:
         return start_time_stamp  # Ensure no change when result = start_time_stamp
 
@@ -7506,8 +7506,8 @@ def convert_to_unix(schedule_time, start_time_stamp, hours_per_day=24):
     return int(current_datetime.timestamp())
 
 
-def convert_from_unix(deadline_timestamp, start_time_stamp, hours_per_day=24):
-    """Convert a Unix timestamp back to scheduling hours relative to start_time_stamp, accounting for skipped Sundays."""
+def solver_time_from_unix(deadline_timestamp, start_time_stamp, hours_per_day=24):
+    """Convert deadline Unix timestamp back to Solver timestamp relative to start_time_stamp, accounting for skipped Sundays."""
     if deadline_timestamp == start_time_stamp:
         return 0  # Return 0 when deadline_timestamp = start_time_stamp
 
@@ -7528,7 +7528,6 @@ def convert_from_unix(deadline_timestamp, start_time_stamp, hours_per_day=24):
 
     return int(total_working_hours)
 
-# Define the resource and parameters
 # API for worker assignment
 @api.route('/worker-assignment')
 class WorkerAssignment(Resource):
@@ -7582,9 +7581,6 @@ class WorkerAssignment(Resource):
             deadline_timestamp = order["deadline"]
             duration_seconds = deadline_timestamp - start_time_timestamp
 
-            # Convert seconds to mins
-            duration_mins = duration_seconds / 60
-
             # Use the geometry_line_mapping to identify the available lines for the given order
             geometry_line_mapping = data.get('geometry_line_mapping')
             line_list = []
@@ -7611,7 +7607,7 @@ class WorkerAssignment(Resource):
                             temp = init_line_list[throughput_mapping['line']]
                         order_dict[order['order']].append(
                             (math.ceil(duration), temp, priority,
-                             math.ceil(convert_from_unix(deadline_timestamp, start_time_timestamp))))
+                             math.ceil(solver_time_from_unix(deadline_timestamp, start_time_timestamp))))
 
                     temp = 0
         for key, value in order_dict.items():
@@ -7710,8 +7706,8 @@ class WorkerAssignment(Resource):
             worker_id = availability["worker"].split()[-1]  # Extract worker ID (assuming format "worker <id>")
 
             # Calculate relative times in hours, rounded up
-            from_relative = math.ceil(convert_from_unix(availability["from_timestamp"], start_time_timestamp))  # Rounded down
-            end_relative = math.ceil(convert_from_unix(availability["end_timestamp"], start_time_timestamp))  # Rounded up
+            from_relative = math.ceil(solver_time_from_unix(availability["from_timestamp"], start_time_timestamp))  # Rounded down
+            end_relative = math.ceil(solver_time_from_unix(availability["end_timestamp"], start_time_timestamp))  # Rounded up
 
             # Ensure values are natural numbers
             from_relative = max(0, from_relative)
@@ -7731,12 +7727,6 @@ class WorkerAssignment(Resource):
                     "availability": [(from_relative, end_relative)]
                 })
 
-        # Hard coded worker_availabilities example not to be used
-        #worker_availabilities = [
-            #    # first shift
-        #    {'Worker_id': 1, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
-        #]
-
         # For each task (Order) in the result obtained from order_to_line, we add the list of possible geometries
         # see hardcoded order_details in cp_worker_allocation.py for more information
         line_allocation = []
@@ -7754,10 +7744,6 @@ class WorkerAssignment(Resource):
                     # Handle missing key, e.g., skip or log an error
                     pass
 
-        #    order['required_workers'] = required_workers_mapping[order['Resource']][order['geometry']]
-        # line_allocation_with_geometry_and_required_workers = extend_line_allocation_with_geometry_and_required_workers(
-        #    order_to_line
-
         # We perform the worker_allocation by running the solver
         allocation_list = main_allocation(
             line_data=line_allocation,
@@ -7770,7 +7756,6 @@ class WorkerAssignment(Resource):
                 temp_worker_allocation_data = allocation_list[items['Resource']]
                 worker_allocation_data = []
                 for i in temp_worker_allocation_data:
-                    # append 100000 to stick to the given worker list format but can be removed later
                     worker_allocation_data.append(i)
                 items['workers'] = worker_allocation_data
             else:
@@ -7793,7 +7778,7 @@ class WorkerAssignment(Resource):
 
         return {
             "message": message,
-            "solution": final_result  # Final result
+            "solution": final_result
         }, 200
 
 
@@ -7877,7 +7862,7 @@ class WorkerAssignment(Resource):
                         if init_line_list[throughput_mapping['line']]:
                             temp = init_line_list[throughput_mapping['line']]
                         order_dict[order['order']].append(
-                            (math.ceil(duration), temp, priority, math.ceil(convert_from_unix(deadline_timestamp,start_time_timestamp))))
+                            (math.ceil(duration), temp, priority, math.ceil(solver_time_from_unix(deadline_timestamp,start_time_timestamp))))
                     temp = 0
         for key, value in order_dict.items():
             if value:
@@ -7896,8 +7881,8 @@ class WorkerAssignment(Resource):
                 temp_sol['Resource'] = temp_line_list[temp_sol['Resource']]
             if temp_sol['Task'] in order_map:
                 temp_sol['Task'] = order_map[temp_sol['Task']]
-            temp_sol['Start'] = convert_to_unix(temp_sol['Start'],start_time_timestamp)
-            temp_sol['Finish'] = convert_to_unix(temp_sol['Finish'],start_time_timestamp)
+            temp_sol['Start'] = unix_time_from_solver(temp_sol['Start'],start_time_timestamp)
+            temp_sol['Finish'] = unix_time_from_solver(temp_sol['Finish'],start_time_timestamp)
             final_result.append(temp_sol)
         print(order_list)
         return {
