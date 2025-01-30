@@ -3,7 +3,7 @@ import math
 from flask import Flask, request
 from flask_restx import Api, Resource, fields, reqparse
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import warnings
 
 from order_scheduling.cp_order_to_line import main
@@ -26,8 +26,8 @@ order_data_model = api.model('OrderData', {
 
 geometry_line_mapping_model = api.model('GeometryLineMapping', {
     'geometry': fields.String(required=True, example="geo1", description="Geometry name"),
-    'main_line': fields.Integer(required=True, example= 7, description="Main production line"),
-    'alternative_lines': fields.List(fields.Integer, required=True, example=[17],
+    'main_line': fields.String(required=True, example= "Line 7", description="Main production line"),
+    'alternative_lines': fields.List(fields.String, required=True, example=["Line 17"],
                                      description="Alternative lines"),
     'number_of_workers': fields.Integer(required=True, example=3, description="Number of workers")
 })
@@ -249,159 +249,157 @@ request_body_model = api.model('WorkerAssignmentRequest', {
     'geometry_line_mapping': fields.List(fields.Nested(geometry_line_mapping_model), required=True,
                                          description="Mapping of geometries to production lines.",
                                          example=[
-        {
-            "geometry": "1340746080/8080",
-            "main_line": 17,
-            "alternative_lines": [],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "468634640",
-            "main_line": 20,
-            "alternative_lines": [
-                16,
-                21
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "505469840/505518110",
-            "main_line": 17,
-            "alternative_lines": [
-                18
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1344640080/4711080",
-            "main_line": 17,
-            "alternative_lines": [
-                3404
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "533908540",
-            "main_line": 24,
-            "alternative_lines": [
-                20
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "521392800/970",
-            "main_line": 17,
-            "alternative_lines": [
-                18
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1340750080",
-            "main_line": 20,
-            "alternative_lines": [
-                24
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1342266080",
-            "main_line": 20,
-            "alternative_lines": [],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "501527470",
-            "main_line": 24,
-            "alternative_lines": [
-                19
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1343314080",
-            "main_line": 17,
-            "alternative_lines": [
-                19
-            ],
-            "number_of_workers": 6
-        },
-        {
-            "geometry": "531359140",
-            "main_line": 17,
-            "alternative_lines": [
-                18
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1343327080",
-            "main_line": 20,
-            "alternative_lines": [],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "534259180",
-            "main_line": 24,
-            "alternative_lines": [
-                20
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "534259080",
-            "main_line": 24,
-            "alternative_lines": [
-                20
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "522216940",
-            "main_line": 17,
-            "alternative_lines": [
-                18
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "521402240",
-            "main_line": 17,
-            "alternative_lines": [
-                18
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1342236080",
-            "main_line": 20,
-            "alternative_lines": [
-                16
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "1342238080",
-            "main_line": 20,
-            "alternative_lines": [
-                24
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "531359170",
-            "main_line": 24,
-            "alternative_lines": [
-                20
-            ],
-            "number_of_workers": 4
-        },
-        {
-            "geometry": "505597580",
-            "main_line": 24,
-            "alternative_lines": [],
-            "number_of_workers": 4
-        }
+                                             {
+                                                 "geometry": "1340746080/8080",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "468634640",
+                                                 "main_line": "Line 20",
+                                                 "alternative_lines": [
+                                                     "Line 16",
+                                                     "Line 21"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "505469840/505518110",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [
+                                                     "Line 18"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1344640080/4711080",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "533908540",
+                                                 "main_line": "Line 24",
+                                                 "alternative_lines": [
+                                                     "Line 20"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "521392800/970",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [
+                                                     "Line 18"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1340750080",
+                                                 "main_line": "Line 20",
+                                                 "alternative_lines": [
+                                                     "Line 24"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1342266080",
+                                                 "main_line": "Line 20",
+                                                 "alternative_lines": [],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "501527470",
+                                                 "main_line": "Line 24",
+                                                 "alternative_lines": [
+                                                     "Line 19"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1343314080",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [
+                                                     "Line 19"
+                                                 ],
+                                                 "number_of_workers": 6
+                                             },
+                                             {
+                                                 "geometry": "531359140",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [
+                                                     "Line 18"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1343327080",
+                                                 "main_line": "Line 20",
+                                                 "alternative_lines": [],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "534259180",
+                                                 "main_line": "Line 24",
+                                                 "alternative_lines": [
+                                                     "Line 20"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "534259080",
+                                                 "main_line": "Line 24",
+                                                 "alternative_lines": [
+                                                     "Line 20"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "522216940",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [
+                                                     "Line 18"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "521402240",
+                                                 "main_line": "Line 17",
+                                                 "alternative_lines": [
+                                                     "Line 18"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1342236080",
+                                                 "main_line": "Line 20",
+                                                 "alternative_lines": [
+                                                     "Line 16"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "1342238080",
+                                                 "main_line": "Line 20",
+                                                 "alternative_lines": [
+                                                     "Line 24"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "531359170",
+                                                 "main_line": "Line 24",
+                                                 "alternative_lines": [
+                                                     "Line 20"
+                                                 ],
+                                                 "number_of_workers": 4
+                                             },
+                                             {
+                                                 "geometry": "505597580",
+                                                 "main_line": "Line 24",
+                                                 "alternative_lines": [],
+                                                 "number_of_workers": 4
+                                             }
     ]),
     'throughput_mapping': fields.List(fields.Nested(throughput_mapping_model), required=True,
                                       description="List of throughput mappings for each line.",
@@ -7488,6 +7486,48 @@ request_body_model = api.model('WorkerAssignmentRequest', {
 })
 
 
+def convert_to_unix(schedule_time, start_time_stamp, hours_per_day=24):
+    """Convert scheduling hours into a Unix timestamp relative to start_time_stamp, skipping Sundays."""
+    if schedule_time == 0:
+        return start_time_stamp  # Ensure no change when result = start_time_stamp
+
+    current_datetime = datetime.utcfromtimestamp(start_time_stamp)
+    full_days, remaining_hours = divmod(schedule_time, hours_per_day)
+    added_days = 0
+
+    while added_days < full_days:
+        current_datetime += timedelta(days=1)
+        if current_datetime.weekday() != 6:  # Skip Sundays
+            added_days += 1
+
+    # Add remaining hours after full working days
+    current_datetime += timedelta(hours=remaining_hours)
+
+    return int(current_datetime.timestamp())
+
+
+def convert_from_unix(deadline_timestamp, start_time_stamp, hours_per_day=24):
+    """Convert a Unix timestamp back to scheduling hours relative to start_time_stamp, accounting for skipped Sundays."""
+    if deadline_timestamp == start_time_stamp:
+        return 0  # Return 0 when deadline_timestamp = start_time_stamp
+
+    current_datetime = datetime.utcfromtimestamp(start_time_stamp)
+    deadline_datetime = datetime.utcfromtimestamp(deadline_timestamp)
+
+    total_working_hours = 0
+
+    while current_datetime.date() < deadline_datetime.date():
+        if current_datetime.weekday() != 6:  # Skip Sundays
+            total_working_hours += hours_per_day
+        current_datetime += timedelta(days=1)
+
+    # Calculate extra hours in the last partial working day
+    if current_datetime.weekday() != 6:
+        extra_hours = (deadline_datetime - current_datetime).total_seconds() // 3600
+        total_working_hours += extra_hours
+
+    return int(total_working_hours)
+
 # Define the resource and parameters
 # API for worker assignment
 @api.route('/worker-assignment')
@@ -7559,7 +7599,7 @@ class WorkerAssignment(Resource):
             for throughput_mapping in throughput_mapping_list:
                 temp = 0
                 for line in line_list:
-                    if throughput_mapping['line'] == "Line " + str(line) and throughput_mapping['geometry'] == order['geometry']:
+                    if throughput_mapping['line'] == line and throughput_mapping['geometry'] == order['geometry']:
                         if throughput_mapping['throughput'] == 0:
                             warnings.warn("Throughput adjusted to 300")
                             throughput_mapping['throughput'] = 300
@@ -7570,7 +7610,9 @@ class WorkerAssignment(Resource):
                         if init_line_list[throughput_mapping['line']]:
                             temp = init_line_list[throughput_mapping['line']]
                         order_dict[order['order']].append(
-                            (math.ceil(duration), temp, priority, math.ceil(duration_mins)))
+                            (math.ceil(duration), temp, priority,
+                             math.ceil(convert_from_unix(deadline_timestamp, start_time_timestamp))))
+
                     temp = 0
         for key, value in order_dict.items():
             if value:
@@ -7667,13 +7709,9 @@ class WorkerAssignment(Resource):
         for availability in availabilities:
             worker_id = availability["worker"].split()[-1]  # Extract worker ID (assuming format "worker <id>")
 
-            # Assume the from_time and end_time is relative to start_time_timestamp
-            from_timestamp = start_time_timestamp + availability["from_timestamp"]
-            end_timestamp = start_time_timestamp + availability["end_timestamp"]
-
             # Calculate relative times in hours, rounded up
-            from_relative = math.floor((from_timestamp - start_time_timestamp) / 3600)  # Rounded down
-            end_relative = math.ceil((end_timestamp - start_time_timestamp) / 3600)  # Rounded up
+            from_relative = math.ceil(convert_from_unix(availability["from_timestamp"], start_time_timestamp))  # Rounded down
+            end_relative = math.ceil(convert_from_unix(availability["end_timestamp"], start_time_timestamp))  # Rounded up
 
             # Ensure values are natural numbers
             from_relative = max(0, from_relative)
@@ -7749,9 +7787,9 @@ class WorkerAssignment(Resource):
                 temp_sol['Task'] = order_map[temp_sol['Task']]
             final_result.append(temp_sol)
 
-        message = "Successfully performed worker allocation operation."
-        if len(line_allocation) == 0:
-            message = "No Optimal / Feasible solution found!!"
+        message = "No Optimal / Feasible solution found!!"
+        if allocation_list:
+            message = "Successfully performed worker allocation operation."
 
         return {
             "message": message,
@@ -7828,7 +7866,7 @@ class WorkerAssignment(Resource):
             for throughput_mapping in throughput_mapping_list:
                 temp = 0
                 for line in line_list:
-                    if throughput_mapping['line'] == "Line " + str(line) and throughput_mapping['geometry'] == order['geometry']:
+                    if throughput_mapping['line'] == line and throughput_mapping['geometry'] == order['geometry']:
                         if throughput_mapping['throughput'] == 0:
                             warnings.warn("Throughput adjusted to 300")
                             throughput_mapping['throughput'] = 300
@@ -7839,7 +7877,7 @@ class WorkerAssignment(Resource):
                         if init_line_list[throughput_mapping['line']]:
                             temp = init_line_list[throughput_mapping['line']]
                         order_dict[order['order']].append(
-                            (math.ceil(duration), temp, priority, math.ceil(duration_mins)))
+                            (math.ceil(duration), temp, priority, math.ceil(convert_from_unix(deadline_timestamp,start_time_timestamp))))
                     temp = 0
         for key, value in order_dict.items():
             if value:
@@ -7858,6 +7896,8 @@ class WorkerAssignment(Resource):
                 temp_sol['Resource'] = temp_line_list[temp_sol['Resource']]
             if temp_sol['Task'] in order_map:
                 temp_sol['Task'] = order_map[temp_sol['Task']]
+            temp_sol['Start'] = convert_to_unix(temp_sol['Start'],start_time_timestamp)
+            temp_sol['Finish'] = convert_to_unix(temp_sol['Finish'],start_time_timestamp)
             final_result.append(temp_sol)
         print(order_list)
         return {

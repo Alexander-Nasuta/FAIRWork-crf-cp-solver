@@ -78,7 +78,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         self.__solution_count += 1
 
 
-def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int = 16,  order_list: List[Any] = None) -> pandas.DataFrame:
+def main(makespan_weight: int = 1, tardiness_weight: int = 1, hours_per_day: int = 24,  order_list: List[Any] = None) -> pandas.DataFrame:
     log.info("Running main function")
     log.info(f"makespan_weight: {makespan_weight}, tardiness_weight: {tardiness_weight}")
 
@@ -241,7 +241,7 @@ Cost: {solver.Value(objective_var)} (measures the quality of the solution)
 
     gantt_chart_console(df_total_time_window, n_machines=n_machines, resource_naming='Line')
 
-    hours_per_day = 16
+    hours_per_day = 24
     full_days, remaining_hours = divmod(makespan, hours_per_day)
     total_days = full_days + (1 if remaining_hours > 0 else 0)
     log.info(f"""
