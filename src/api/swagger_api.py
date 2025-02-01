@@ -7634,9 +7634,11 @@ class WorkerAssignment(Resource):
         # Iterate through the workers and store the
         # "experience" "preference" "resilience" and "medical-condition" for each worker
         worker_map = {}
+        worker_reverse_map = {}
         for worker in worker_list:
             if int(worker) not in worker_map:
                 worker_map[int(worker)] = index
+                worker_reverse_map[index] = int(worker)
                 worker_specific_data[index] = {}
                 index = index + 1
             for factor in human_factor:
@@ -7649,7 +7651,7 @@ class WorkerAssignment(Resource):
                         "experience": factor['experience'],
                         "preference": factor['preference'],
                         "resilience": factor['resilience'],
-                        "medical-condition": medical_condition
+                        "medical-condition": True
                     }
                     worker_specific_data[worker_map[int(worker)]][factor['geometry']] = new_data
 
@@ -7744,16 +7746,28 @@ class WorkerAssignment(Resource):
                     # Handle missing key, e.g., skip or log an error
                     pass
 
+        unique_data = list({tuple(item.items()) for item in line_allocation})
+        unique_line_allocation = [dict(item) for item in unique_data]
+        line_allocation = unique_line_allocation
+
         # We perform the worker_allocation by running the solver
         allocation_list = main_allocation(
             line_data=line_allocation,
             worker_specific_data=worker_specific_data,
             worker_availabilities=worker_availabilities)
 
-        # Extract the results and convert into the desired output format
+        # Parse the worker ids back to the user input format
+        parsed_allocation_list = {}
+        for key, values in allocation_list.items():
+            temp_workers = []
+            for value in values:
+                temp_workers.append(worker_reverse_map[value])
+            parsed_allocation_list[key] = temp_workers
+
+        # Extract the worker allocation results and convert into the desired output format
         for items in line_allocation:
-            if items['Resource'] in allocation_list:
-                temp_worker_allocation_data = allocation_list[items['Resource']]
+            if items['Resource'] in parsed_allocation_list:
+                temp_worker_allocation_data = parsed_allocation_list[items['Resource']]
                 worker_allocation_data = []
                 for i in temp_worker_allocation_data:
                     worker_allocation_data.append(i)
@@ -7761,8 +7775,7 @@ class WorkerAssignment(Resource):
             else:
                 items['workers'] = []
 
-
-
+        # Generate the Final result to be displayed in the API User Interface
         final_result = []
         for solution in line_allocation:
             temp_sol = solution.copy()
@@ -7775,6 +7788,7 @@ class WorkerAssignment(Resource):
         message = "No Optimal / Feasible solution found!!"
         if allocation_list:
             message = "Successfully performed worker allocation operation."
+            final_result = sorted(final_result, key=lambda x: x['Task'])
 
         return {
             "message": message,
