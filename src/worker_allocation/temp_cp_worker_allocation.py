@@ -1,4 +1,6 @@
 import pprint
+from typing import List, Any, Dict
+import re
 
 import pandas
 
@@ -30,7 +32,7 @@ def is_interval_included(target_interval, interval_list):
 
 def extend_line_allocation_with_geometry_and_required_workers(line_allocation: list) -> list[dict]:
     order_details = {
-        "Order 0": {"geometry": "geo3"},
+        "Order 0": {"geometry": "geo1"},
         "Order 1": {"geometry": "geo2"},
         "Order 2": {"geometry": "geo5"},
         "Order 3": {"geometry": "geo1"},
@@ -86,262 +88,141 @@ def extend_line_allocation_with_geometry_and_required_workers(line_allocation: l
     return line_allocation
 
 
-def main(line_data: list[dict], worker_specific_data: dict, worker_availabilities: list[dict],
-         preference_weight: int = 1, experience_weight: int = 1, resistance_weight: int = 1,
-         staffing_weight: int = 1) -> None:
+medical_flag = False  # Global flag
+
+
+def main_allocation(line_data: List[Dict], worker_specific_data: Dict, worker_availabilities: List[Dict],
+                    preference_weight: int = 1, experience_weight: int = 1, resistance_weight: int = 1,
+                    staffing_weight: int = 1) -> Dict[str, List[Any]]:
+    global medical_flag  # Using the global flag variable to retry if no valid solution is found with medical condition
+
     model = cp_model.CpModel()
+    hours_per_day = 24
+    makespan = max(order['Finish'] for order in line_data)  # Maximum time for all line tasks
+    full_days, remaining_hours = divmod(makespan, hours_per_day)  # Calculate full days and remaining hours
+    total_days = full_days + (1 if remaining_hours > 0 else 0)  # Total days for the schedule
+    horizon = total_days * hours_per_day  # Total horizon in hours
 
-    makespan = max([order['Finish'] for order in line_data])
+    line_names = list({order['Resource'] for order in line_data})  # Extract unique line names
 
-    hours_per_day = 16
-    full_days, remaining_hours = divmod(makespan, hours_per_day)
-    total_days = full_days + (1 if remaining_hours > 0 else 0)
-    hours_per_day = 16
-    full_days, remaining_hours = divmod(makespan, hours_per_day)
-    total_days = full_days + (1 if remaining_hours > 0 else 0)
-    log.info(f"""
+    # Calculate the minimum and maximum number of workers per line
 
-    Days to complete all orders: {total_days} ({hours_per_day} hours per day)
-    Days that are fully utilized: {full_days}
-    Remaining hours in the last day: {remaining_hours}
+    min_workers_per_line = {}
+    max_workers_per_line = {}
 
-            """)
+    for line in line_names:
+        line_orders = [order for order in line_data if order['Resource'] == line]
+        min_workers_per_line[line] = max(order['required_workers'] for order in line_orders)
+        max_workers_per_line[line] = sum(order['required_workers'] for order in line_orders)
 
-    horizon = full_days * hours_per_day
+    # Created an assignment variables for each worker and each line (whether the worker is assigned to that line or not)
+    assignment_vars = {}
+    for worker in worker_specific_data:
+        worker_id = worker
+        assignment_vars[worker_id] = {}
+        for line in line_names:
+            assignment_vars[worker_id][line] = model.NewBoolVar(f"assign_worker_{worker_id}_to_{line}")
 
-    n_lines = 3  # Todo calculate from line_data
-    lines_names = {"Line 0", "Line 1", "Line 2"}
-    cp_ids_of_lines = {
-        "Line 0": 0,
-        "Line 1": 1,
-        "Line 2": 2
-    }
-    lines_names_of_cp_ids = {
-        0: "Line 0",
-        1: "Line 1",
-        2: "Line 2"
-    }
-    n_workers = len(worker_specific_data)
+    # Add constraint that each worker can be assigned to at most one line at any given time
+    for worker in worker_specific_data:
+        worker_id = worker
+        model.Add(sum(assignment_vars[worker_id][line] for line in line_names) <= 1)
 
-    interval_bounds = set()
+    # Add constraints to ensure each line has the required number of workers within [min,max]
+    for line in line_names:
+        model.Add(
+            sum(assignment_vars[worker_id][line] for worker_id in worker_specific_data) >= min_workers_per_line[line])
+        model.Add(
+            sum(assignment_vars[worker_id][line] for worker_id in worker_specific_data) <= max_workers_per_line[line])
 
-    for order_record_in_line_allocation_df in line_data:
-        interval_bounds.add(order_record_in_line_allocation_df['Start'])
-        interval_bounds.add(order_record_in_line_allocation_df['Finish'])
-
+    # Hard Constraint
+    # Add constraints for workers, ensuring they are only assigned to lines during their available intervals
     for worker in worker_availabilities:
-        for w_availability_interval in worker['availability']:
-            interval_bounds.add(w_availability_interval[0])
-            interval_bounds.add(w_availability_interval[1])
+        worker_id = worker['Worker_id']
+        for availability in worker['availability']:
+            start, end = availability
+            availability_var = model.NewBoolVar(f"worker_{worker_id}_available_{start}_{end}")
+            for line in line_names:
+                model.Add(assignment_vars[worker_id][line] == 1).OnlyEnforceIf(availability_var)
 
-    interval_bounds_ascending_list = sorted(list(interval_bounds))
+    # Hard constraint: workers with a medical condition cannot be assigned to specific lines based on the geometry
+    # This block is skipped if medical_flag is True (When no valid solution was found using medical flag)
+    if not medical_flag:
+        for worker_id, worker_data in worker_specific_data.items():
+            for geo, geo_data in worker_data.items():
+                if geo_data.get("medical-condition", False):  # Only apply to workers with a medical condition
+                    for line in line_names:
+                        if any(order['Resource'] == line and order.get('geometry') == geo for order in line_data):
+                            model.Add(assignment_vars[worker_id][line] == 0)
 
-    interval_tuple = []  # [(start, end), ...]
-    for interval_start, interval_end in zip(interval_bounds_ascending_list[:-1], interval_bounds_ascending_list[1:]):
-        interval_tuple.append((interval_start, interval_end))
+    # Soft constraints: deviations from the ideal assignment based on preference, experience, resistance, and staffing
+    preference_total = []
+    experience_total = []
+    resistance_total = []
+    staffing_total = []
+    for worker in worker_specific_data:
+        worker_id = worker
+        for line in line_names:
+            preference = model.NewIntVar(0, 10 * horizon, f"preference_penalty_{worker_id}_{line}")
+            experience = model.NewIntVar(0, 10 * horizon, f"experience_penalty_{worker_id}_{line}")
+            resistance = model.NewIntVar(0, 10 * horizon, f"resistance_penalty_{worker_id}_{line}")
+            staffing = model.NewIntVar(0, 10 * horizon, f"staffing_penalty_{worker_id}_{line}")
 
-    n_intervals = len(interval_tuple)
-    log.info(f"the schedule is devided into {n_intervals} intervals: {interval_tuple}")
-    log.info(f"the available workers are will be assigned to a line within these intervals")
+            model.Add(preference == preference_weight).OnlyEnforceIf(assignment_vars[worker_id][line])
+            model.Add(experience == experience_weight).OnlyEnforceIf(assignment_vars[worker_id][line])
+            model.Add(resistance == resistance_weight).OnlyEnforceIf(assignment_vars[worker_id][line])
+            model.Add(staffing == staffing_weight).OnlyEnforceIf(assignment_vars[worker_id][line])
 
-    cp_variable_store = {}  # accessed (i_start, i_end, w_id) -> (experience, preference, resilience, allocation)
-    cp_line_staff_variables = {}  # accessed (i_start, i_end, line_id) -> (staffing)
+            preference_total.append(preference)
+            experience_total.append(experience)
+            resistance_total.append(resistance)
+            staffing_total.append(staffing)
 
-    for interval_start, interval_end in interval_tuple:
-        log.info(f"handling interval: [{interval_start}, {interval_end}]")
+    # Calculate the total number of workers assigned
+    total_workers_assigned = sum(
+        assignment_vars[worker_id][line] for worker_id in worker_specific_data for line in line_names
+    )
 
-        # determine which orders and geometries are handled in this time interval on the lines
-        line_details_within_interval = {}  # accessed line_name -> (required_workers, geometry, w_line_interval)
+    # Add slack variable to handle over or under-staffing and ensure value close to required workers
+    staffing_slack = model.NewIntVar(0, sum(max_workers_per_line.values()), "staffing_slack")
+    model.Add(staffing_slack == sum(
+        sum(assignment_vars[worker_id][line] for worker_id in worker_specific_data) - min_workers_per_line[line]
+        for line in line_names
+    ))
 
-        # to do so filter the line_data for the orders that are within the interval
-        relevant_orders = [order for order in line_data if interval_start <= order['Start'] <= interval_end]
-        log.info(f"relevant_orders: {relevant_orders}")
+    # Define the objective: maximize the weighted sum of preference, experience, resistance, and staffing
+    objective = model.NewIntVar(0, 100000, "objective")
+    model.Add(objective == sum(preference_total) + sum(experience_total) + sum(resistance_total) + sum(
+        staffing_total))
 
-        if not relevant_orders:
-            log.info(f"no orders are within the interval: [{interval_start}, {interval_end}]")
-            continue
+    # Staffing constraints ensuring number of workers as close to required number for line and prevent over-staffing
+    model.Maximize(objective + staffing_weight * staffing_slack - staffing_weight * total_workers_assigned)
 
-        for order_info in relevant_orders:
-            for line_name in lines_names:
-                line_details_within_interval[line_name] = {
-                    "required_workers": order_info['required_workers'] if order_info['Resource'] == line_name else 0,
-                    "geometry": order_info['geometry'] if order_info['Resource'] == line_name else None,
-                    "w_line_interval": []
-                }
+    # For more staff allocation (Over-staffing) better constraint is:
+    # model.Maximize(objective + staffing_weight * staffing_slack)
 
-        for worker in worker_availabilities:
-            worker_id = worker['Worker_id']
-            worker_available_intervals = worker['availability']
-            log.info(f"[{interval_start}, {interval_end}] handling worker: {worker_id}")
-
-            # creating variables to be used in the cost function in the end
-            w_experience = model.new_int_var(0, horizon * 100,
-                                             f"w_{worker_id}_{interval_start}_{interval_end}_experience")
-            w_preference = model.new_int_var(0, horizon * 100,
-                                             f"w_{worker_id}_{interval_start}_{interval_end}_preference")
-            w_resilience = model.new_int_var(0, horizon * 100,
-                                             f"w_{worker_id}_{interval_start}_{interval_end}_resilience")
-            w_allocation = model.new_int_var(-1, len(lines_names) - 1,
-                                             f"w_{worker_id}_{interval_start}_{interval_end}_allocation")
-
-            # add the variables to the store
-            cp_variable_store[(interval_start, interval_end, worker_id)] = (w_experience, w_preference, w_resilience,
-                                                                            w_allocation)
-
-            # store the variables to enforce the constraints later
-            # only one entry in this list will be 1, the rest will be 0
-            assignment_possibilities = []
-
-            # handle the case of a not present worker
-            # if the worker is not available in the interval, the allocation is -1
-            # the experience, preference and resilience are set to 0, so that they do not influence the cost function
-            w_not_present = model.new_bool_var(f"w_{worker['Worker_id']}_{interval_start}_{interval_end}_not_present")
-
-            model.Add(w_experience == 0).only_enforce_if(w_not_present)
-            model.Add(w_preference == 0).only_enforce_if(w_not_present)
-            model.Add(w_resilience == 0).only_enforce_if(w_not_present)
-
-            model.Add(w_allocation == -1).only_enforce_if(w_not_present)
-
-            # add the not present variable to the assignment_possibilities
-            # setting w_not_present to 1 will set all other variables to 0
-            # so that the worker is not assigned to any line
-            assignment_possibilities.append(w_not_present)
-
-            # CONSTRAINT: worker availability
-            # check if the worker is available in the interval
-            # if not the worker is not allowed to work on any line
-            worker_is_present = is_interval_included((interval_start, interval_end), worker_available_intervals)
-            if not worker_is_present:
-                log.info(f"[{interval_start}, {interval_end}] Worker {worker_id} is not available")
-                model.Add(w_not_present == 1)
-
-            for line_name in lines_names:
-                # check if there is work to be done on the line in this interval
-                if line_details_within_interval[line_name]["required_workers"] == 0:
-                    # if there is no work to be done, the worker is not allowed to work on the line
-                    # for the cp program this means that w_line_interval is enforced to be 0
-                    continue
-
-                w_line_interval = model.new_bool_var(
-                    f"w_{worker_id}_{interval_start}_{interval_end}_{line_name.replace(' ', '_')}")
-                # add the variable to the assignment_possibilities
-                assignment_possibilities.append(w_line_interval)
-
-                # add the variable to the line_details_within_interval
-                # to enforce the minimum number of workers on the line later
-                line_details_within_interval[line_name]["w_line_interval"].append(w_line_interval)
-
-                # look up the geometry that is handled in the line in this interval
-                geometry = line_details_within_interval[line_name]['geometry']
-
-                # look up the resilience, preference and experience of the worker for the geometry of the line
-                worker_specific_data_for_worker = worker_specific_data[worker_id]
-                interval_length = interval_end - interval_start
-                resilience = int(worker_specific_data_for_worker[geometry]['resilience'] * 100) * interval_length
-                preference = int(worker_specific_data_for_worker[geometry]['preference'] * 100) * interval_length
-                experience = int(worker_specific_data_for_worker[geometry]['experience'] * 100) * interval_length
-
-                # set the resilience, preference and experience variables to the values of the worker
-                # if the worker is assigned to the line
-                model.Add(w_resilience == resilience).only_enforce_if(w_line_interval)
-                model.Add(w_preference == preference).only_enforce_if(w_line_interval)
-                model.Add(w_experience == experience).only_enforce_if(w_line_interval)
-
-                cp_id_of_line = cp_ids_of_lines[line_name]
-                model.Add(w_allocation == cp_id_of_line).only_enforce_if(w_line_interval)
-
-                # CONSTRAINT: medical condition
-                # check the medical condition of the worker
-                # if it is false the worker is not allowed to work on the line
-                # for the cp program this means that w_line_interval is enforced to be 0
-                if not worker_specific_data_for_worker[geometry]['medical-condition']:
-                    model.Add(w_line_interval == 0)
-
-            # enforce that only one of the assignment_possibilities can be 1
-            model.AddExactlyOne(assignment_possibilities)
-
-        # CONSTRAINT: required workers
-        # Control the number of workers assigned to a line
-        for line_name, entry in line_details_within_interval.items():
-            required_workers = entry['required_workers']
-
-            if required_workers == 0:
-                continue
-            # the number of workers assigned to the line must be at least the required number of workers
-            log.info(f"[{interval_start}, {interval_end}] enforcing required workers for line {line_name}. "
-                     f"required: {required_workers}")
-            var_name = f"line_{line_name}_w_offset_in_interval_{interval_start}_{interval_end}"
-            line_required_worker_offset = model.new_int_var(-required_workers, n_workers, var_name)
-
-            # model.Add(line_required_worker_offset == sum(entry['w_line_interval']) - required_workers)
-            # model.add_min_equality(line_required_worker_offset, [0, sum(entry['w_line_interval']) - required_workers])
-
-            # add staffing to cost instead of hard constraint, so that the model can still be solved
-            cp_line_staff_variables[(interval_start, interval_end, line_name)] = line_required_worker_offset
-
-            # model.Add(sum(entry['w_line_interval']) >= required_workers)
-
-    total_preference = model.new_int_var(0, horizon * 100 * n_workers, "total_preference")
-    model.add(total_preference == sum(w_preference for _, w_preference, _, _ in cp_variable_store.values()))
-
-    total_experience = model.new_int_var(0, horizon * 100 * n_workers, "total_experience")
-    model.add(total_experience == sum(w_experience for w_experience, _, _, _ in cp_variable_store.values()))
-
-    total_resilience = model.new_int_var(0, horizon * 100 * n_workers, "total_resilience")
-    model.add(total_resilience == sum(w_resilience for _, _, w_resilience, _ in cp_variable_store.values()))
-
-    # negative values indicate understaffing
-    # positive values indicate overstaffing
-    # the cost function will try to maximize the total_staff_offset, so that understaffing is minimized
-    total_staff_offset = model.new_int_var(-n_workers * n_intervals, n_workers * n_intervals, "total_understaffing")
-    model.add(total_staff_offset == sum(line_staff_offset for line_staff_offset in cp_line_staff_variables.values()))
-
-    sum_of_weights = preference_weight + experience_weight + resistance_weight + staffing_weight
-    objective = model.new_int_var(0, horizon * 100 * n_workers * 3 * (sum_of_weights), "objective")
-    model.add(objective ==
-              preference_weight * total_preference
-              + experience_weight * total_experience
-              + resistance_weight * total_resilience
-              + staffing_weight * total_staff_offset)
-
-    model.maximize(objective)
-
-    # Solve model.
+    # Solve the model using the CP solver
     solver = cp_model.CpSolver()
-    status = solver.solve(model)
+    status = solver.Solve(model)
 
-    # return if no solution was found
-    if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
-        log.info("No solution found")
-        return
+    workers_list = {}
+    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+        for worker in worker_specific_data:
+            worker_id = worker
+            for line in line_names:
+                if solver.Value(assignment_vars[worker_id][line]):
+                    if line not in workers_list:
+                        workers_list[line] = []
+                    workers_list[line].append(worker_id)
 
-    # iterate over cp_variable_store to get the results
-    for key_tuple, val_tuple in cp_variable_store.items():
-        # deconstruct key tuple
-        interval_start, interval_end, worker_id = key_tuple
-        w_experience, w_preference, w_resilience, w_allocation = val_tuple
+    # If no workers are assigned and medical_condition is False
+    # then retry with medical_condition true to get a valid solution
+    if not workers_list and not medical_flag:
+        medical_flag = True  # Set flag to True and retry
+        return main_allocation(line_data, worker_specific_data, worker_availabilities,
+                               preference_weight, experience_weight, resistance_weight, staffing_weight)
 
-        if solver.Value(w_allocation) != -1:
-            line_cp_id = solver.Value(w_allocation)
-            line_name = lines_names_of_cp_ids[line_cp_id]
-            log.info(
-                f"[{interval_start}-{interval_end}] Worker {worker_id} is assigned to line {line_cp_id} ('{line_name}')")
-        else:
-            log.info(f"[{interval_start}-{interval_end}] Worker {worker_id} is not assigned to any line")
-
-    log.info(f"""
-Solution found: {status == cp_model.OPTIMAL or status == cp_model.FEASIBLE}
-Solution is optimal: {status == cp_model.OPTIMAL}
-
-Number of intervals: {n_intervals}
-
-Objective: {solver.Value(objective)}
-Total preference: {solver.Value(total_preference)}
-Total experience: {solver.Value(total_experience)}
-Total resilience: {solver.Value(total_resilience)}
-
-    """)
+    return workers_list
 
 
 if __name__ == '__main__':
@@ -378,38 +259,37 @@ if __name__ == '__main__':
     line_allocation_with_geometry_and_required_workers = extend_line_allocation_with_geometry_and_required_workers(
         line_allocation_from_previous_step)
 
-    log.debug(
+    log.info(
         f"line_allocation_with_geometry_and_required_workers: {pprint.pformat(line_allocation_with_geometry_and_required_workers)}")
 
     worker_availabilities = [
-    # First shift (full-time)
-    {'Worker_id': 1, "availability": [(0, 8), (16, 24), (32, 40), (48, 56), (64, 72)]},
-    {'Worker_id': 2, "availability": [(0, 8), (16, 24), (32, 40), (48, 56), (64, 72)]},
-    {'Worker_id': 3, "availability": [(0, 8), (16, 24), (32, 40), (48, 56), (64, 72)]},
-    {'Worker_id': 4, "availability": [(0, 8), (16, 24), (32, 40), (48, 56), (64, 72)]},
-    {'Worker_id': 5, "availability": [(0, 8), (16, 24), (32, 40), (48, 56), (64, 72)]},
-    {'Worker_id': 6, "availability": [(0, 8), (16, 24), (32, 40), (48, 56), (64, 72)]},
+        # first shift
+        {'Worker_id': 1, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        {'Worker_id': 2, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        {'Worker_id': 3, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        {'Worker_id': 4, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        {'Worker_id': 5, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        {'Worker_id': 6, "availability": [(0, 7), (16, 23), (32, 39), (48, 55), (64, 71)]},
+        # first shift on some days (not full time)
+        {'Worker_id': 7, "availability": [(0, 7), (16, 23), (32, 39)]},
+        {'Worker_id': 8, "availability": [(0, 7), (16, 23), (32, 39)]},
+        {'Worker_id': 9, "availability": [(48, 55), (64, 71)]},
+        {'Worker_id': 10, "availability": [(0, 7), (16, 23), (32, 39)]},
 
-    # First shift (part-time)
-    {'Worker_id': 7, "availability": [(0, 8), (16, 24), (32, 40)]},
-    {'Worker_id': 8, "availability": [(0, 8), (16, 24), (32, 40)]},
-    {'Worker_id': 9, "availability": [(48, 55), (64, 72)]},
-    {'Worker_id': 10, "availability": [(0, 8), (16, 24), (32, 40)]},
+        # second shift
+        {'Worker_id': 11, "availability": [(8, 15), (24, 31), (40, 47), (56, 63), (72, 79)]},
+        {'Worker_id': 12, "availability": [(8, 15), (24, 31), (40, 47), (56, 63), (72, 79)]},
+        {'Worker_id': 13, "availability": [(8, 15), (24, 31), (40, 47), (56, 63), (72, 79)]},
+        {'Worker_id': 14, "availability": [(8, 15), (24, 31), (40, 47), (56, 63), (72, 79)]},
+        {'Worker_id': 15, "availability": [(8, 15), (24, 31), (40, 47), (56, 63), (72, 79)]},
+        {'Worker_id': 16, "availability": [(8, 15), (24, 31), (40, 47), (56, 63), (72, 79)]},
 
-    # Second shift (full-time)
-    {'Worker_id': 11, "availability": [(8, 16), (24, 32), (40, 48), (56, 64), (72, 80)]},
-    {'Worker_id': 12, "availability": [(8, 16), (24, 32), (40, 48), (56, 64), (72, 80)]},
-    {'Worker_id': 13, "availability": [(8, 16), (24, 32), (40, 48), (56, 64), (72, 80)]},
-    {'Worker_id': 14, "availability": [(8, 16), (24, 32), (40, 48), (56, 64), (72, 80)]},
-    {'Worker_id': 15, "availability": [(8, 16), (24, 32), (40, 48), (56, 64), (72, 80)]},
-    {'Worker_id': 16, "availability": [(8, 16), (24, 32), (40, 48), (56, 64), (72, 80)]},
-
-    # Second shift (part-time)
-    {'Worker_id': 17, "availability": [(8, 16), (24, 32), (40, 48)]},
-    {'Worker_id': 18, "availability": [(8, 16), (24, 32), (40, 48)]},
-    {'Worker_id': 19, "availability": [(56, 64), (72, 80)]},
-    {'Worker_id': 20, "availability": [(8, 16), (24, 32), (40, 48)]},
-]
+        # second shift on some days (not full time)
+        {'Worker_id': 17, "availability": [(8, 15), (24, 31), (40, 47)]},
+        {'Worker_id': 18, "availability": [(8, 15), (24, 31), (40, 47)]},
+        {'Worker_id': 19, "availability": [(56, 63), (72, 79)]},
+        {'Worker_id': 20, "availability": [(8, 15), (24, 31), (40, 47)]},
+    ]
 
     worker_specific_data = {
         1: {
@@ -1054,7 +934,11 @@ if __name__ == '__main__':
         },
     }
 
-    main(
+    worker_list = main_allocation(
         line_data=line_allocation_with_geometry_and_required_workers,
         worker_specific_data=worker_specific_data,
         worker_availabilities=worker_availabilities)
+
+    print(f"Worker Allocation is as follows: {worker_list}")
+    df = pandas.DataFrame(line_allocation_with_geometry_and_required_workers)
+    print(df.head(n=30))
