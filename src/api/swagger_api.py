@@ -9,7 +9,7 @@ import warnings
 from order_scheduling.cp_order_to_line import main
 from worker_allocation.temp_cp_worker_allocation import main_allocation
 
-from worker_allocation.cp_woker_allocation import extend_line_allocation_with_geometry_and_required_workers, mains
+
 
 app = Flask(__name__)
 api = Api(app, version="1.0.0", title="Example API",
