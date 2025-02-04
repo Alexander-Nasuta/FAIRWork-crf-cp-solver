@@ -8,7 +8,8 @@ import warnings
 
 from order_scheduling.cp_order_to_line import main
 from worker_allocation.temp_cp_worker_allocation import main_allocation
-from worker_allocation.cp_woker_allocation import extend_line_allocation_with_geometry_and_required_workers
+
+from worker_allocation.cp_woker_allocation import extend_line_allocation_with_geometry_and_required_workers, mains
 
 app = Flask(__name__)
 api = Api(app, version="1.0.0", title="Example API",
@@ -7565,21 +7566,25 @@ class WorkerAssignment(Resource):
 
         temp = 0
         for to in order_data:
-            if to['order'] not in temp_order_map:
-                temp_order_map[to['order']] = temp
-                order_map['Order ' + str(temp)] = to['order']
+            if str(to['order'] + "_" + to['geometry']) not in temp_order_map:
+                temp_order_map[str(to['order'] + "_" + to['geometry'])] = temp
+                order_map['Order ' + str(temp)] = str(to['order'] + "_" + to['geometry'])
                 temp = temp + 1
 
         temp = 0
         for order in order_data:
-            if order['order'] not in order_dict:
-                order_dict[order['order']] = []  # if order is not in the dictionary we create an enry for it
+            if str(order['order'] + "_" + order['geometry']) not in order_dict:
+                order_dict[str(order['order'] + "_" + order[
+                    'geometry'])] = []  # if order is not in the dictionary we create an enry for it
             priority = 0
             if not order['priority']:
                 priority = 1
             # Convert the time into seconds format
             deadline_timestamp = order["deadline"]
             duration_seconds = deadline_timestamp - start_time_timestamp
+
+            # Convert seconds to mins
+            duration_mins = duration_seconds / 60
 
             # Use the geometry_line_mapping to identify the available lines for the given order
             geometry_line_mapping = data.get('geometry_line_mapping')
@@ -7605,10 +7610,9 @@ class WorkerAssignment(Resource):
                         # to the order_dict for the given order
                         if init_line_list[throughput_mapping['line']]:
                             temp = init_line_list[throughput_mapping['line']]
-                        order_dict[order['order']].append(
+                        order_dict[str(order['order'] + "_" + order['geometry'])].append(
                             (math.ceil(duration), temp, priority,
                              math.ceil(solver_time_from_unix(deadline_timestamp, start_time_timestamp))))
-
                     temp = 0
         for key, value in order_dict.items():
             if value:
@@ -7664,10 +7668,10 @@ class WorkerAssignment(Resource):
         temp = 0
 
         for order in order_list:
-            if order['order'] not in order_dicts:
-                order_dicts[order['order']] = temp
+            if str(order['order'] + "_" + order['geometry']) not in order_dicts:
+                order_dicts[str(order['order'] + "_" + order['geometry'])] = temp
                 temp = temp + 1
-            order_val = "Order " + str(order_dicts[order['order']])
+            order_val = "Order " + str(order_dicts[str(order['order'] + "_" + order['geometry'])])
             if order_val not in order_details:
                 order_details[order_val] = []
             order_details[order_val].append(order['geometry'])
@@ -7694,7 +7698,7 @@ class WorkerAssignment(Resource):
         temp_required_workers_mapping = {}
         temp = 0
         for key, value in required_workers_mapping.items():
-            temp_line = "Line " + str(temp)
+            temp_line = "Line " + str(init_line_list[key])
             temp = temp + 1
             temp_required_workers_mapping[temp_line] = value
             line_mapping[temp_line] = key
@@ -7734,17 +7738,16 @@ class WorkerAssignment(Resource):
         line_allocation = []
         for order in order_to_line:
             geo_list = order_details[order['Task']]
-            for geo in geo_list:
-                temp_order = order
-                temp_order['geometry'] = geo
-                try:
-                    if required_workers_mapping[order['Resource']][temp_order['geometry']]:
-                        temp_order['required_workers'] = required_workers_mapping[order['Resource']][
-                            temp_order['geometry']]
-                        line_allocation.append(temp_order)
-                except KeyError:
-                    # Handle missing key, e.g., skip or log an error
-                    pass
+            temp_order = order.copy()
+            temp_order['geometry'] = order_map[order['Task']].split('_')[1]
+            try:
+               if required_workers_mapping[order['Resource']][temp_order['geometry']]:
+                temp_order['required_workers'] = required_workers_mapping[order['Resource']][
+                temp_order['geometry']]
+                line_allocation.append(temp_order)
+            except KeyError:
+                # Handle missing key, e.g., skip or log an error
+                pass
 
         unique_data = list({tuple(item.items()) for item in line_allocation})
         unique_line_allocation = [dict(item) for item in unique_data]
@@ -7782,7 +7785,7 @@ class WorkerAssignment(Resource):
             if temp_sol['Resource'] in temp_line_list:
                 temp_sol['Resource'] = temp_line_list[temp_sol['Resource']]
             if temp_sol['Task'] in order_map:
-                temp_sol['Task'] = order_map[temp_sol['Task']]
+                temp_sol['Task'] = order_map[temp_sol['Task']].split('_')[0]
             final_result.append(temp_sol)
 
         message = "No Optimal / Feasible solution found!!"
@@ -7832,15 +7835,15 @@ class WorkerAssignment(Resource):
 
         temp = 0
         for to in order_data:
-            if to['order'] not in temp_order_map:
-                temp_order_map[to['order']] = temp
-                order_map['Order ' + str(temp)] = to['order']
+            if str(to['order'] + "_" + to['geometry']) not in temp_order_map:
+                temp_order_map[str(to['order'] + "_" + to['geometry'])] = temp
+                order_map['Order ' + str(temp)] = str(to['order'] + "_" + to['geometry'])
                 temp = temp + 1
 
         temp = 0
         for order in order_data:
-            if order['order'] not in order_dict:
-                order_dict[order['order']] = []  # if order is not in the dictionary we create an enry for it
+            if str(order['order'] + "_" + order['geometry']) not in order_dict:
+                order_dict[str(order['order'] + "_" + order['geometry'])] = []  # if order is not in the dictionary we create an enry for it
             priority = 0
             if not order['priority']:
                 priority = 1
@@ -7875,7 +7878,7 @@ class WorkerAssignment(Resource):
                         # to the order_dict for the given order
                         if init_line_list[throughput_mapping['line']]:
                             temp = init_line_list[throughput_mapping['line']]
-                        order_dict[order['order']].append(
+                        order_dict[str(order['order'] + "_" + order['geometry'])].append(
                             (math.ceil(duration), temp, priority, math.ceil(solver_time_from_unix(deadline_timestamp,start_time_timestamp))))
                     temp = 0
         for key, value in order_dict.items():
@@ -7894,7 +7897,7 @@ class WorkerAssignment(Resource):
             if temp_sol['Resource'] in temp_line_list:
                 temp_sol['Resource'] = temp_line_list[temp_sol['Resource']]
             if temp_sol['Task'] in order_map:
-                temp_sol['Task'] = order_map[temp_sol['Task']]
+                temp_sol['Task'] = order_map[temp_sol['Task']].split('_')[0]
             temp_sol['Start'] = unix_time_from_solver(temp_sol['Start'],start_time_timestamp)
             temp_sol['Finish'] = unix_time_from_solver(temp_sol['Finish'],start_time_timestamp)
             final_result.append(temp_sol)

@@ -237,13 +237,20 @@ def main(line_data: list[dict], worker_specific_data: dict, worker_availabilitie
 
                 # look up the resilience, preference and experience of the worker for the geometry of the line
                 worker_specific_data_for_worker = worker_specific_data[worker_id]
-                interval_length = interval_end - interval_start
-                resilience = int(worker_specific_data_for_worker[geometry]['resilience'] * 100) * interval_length
-                preference = int(worker_specific_data_for_worker[geometry]['preference'] * 100) * interval_length
-                experience = int(worker_specific_data_for_worker[geometry]['experience'] * 100) * interval_length
+                test_data = worker_specific_data_for_worker.get(geometry, None)
+                if test_data is None:
+                    interval_length = 0
+                    resilience = int(0 * 100) * interval_length
+                    preference = int(0 * 100) * interval_length
+                    experience = int(0 * 100) * interval_length
+                else:
+                    interval_length = interval_end - interval_start
+                    resilience = int(worker_specific_data_for_worker[geometry]['resilience'] * 100) * interval_length
+                    preference = int(worker_specific_data_for_worker[geometry]['preference'] * 100) * interval_length
+                    experience = int(worker_specific_data_for_worker[geometry]['experience'] * 100) * interval_length
 
                 # set the resilience, preference and experience variables to the values of the worker
-                # if the worker is assigned to the line
+                # if the wodata = worker_specific_data_for_worker.get(geometry, None)rker is assigned to the line
                 model.Add(w_resilience == resilience).only_enforce_if(w_line_interval)
                 model.Add(w_preference == preference).only_enforce_if(w_line_interval)
                 model.Add(w_experience == experience).only_enforce_if(w_line_interval)
@@ -255,8 +262,11 @@ def main(line_data: list[dict], worker_specific_data: dict, worker_availabilitie
                 # check the medical condition of the worker
                 # if it is false the worker is not allowed to work on the line
                 # for the cp program this means that w_line_interval is enforced to be 0
-                if not worker_specific_data_for_worker[geometry]['medical-condition']:
+                if test_data is None:
                     model.Add(w_line_interval == 0)
+                else:
+                    if not worker_specific_data_for_worker[geometry]['medical-condition']:
+                        model.Add(w_line_interval == 0)
 
             # enforce that only one of the assignment_possibilities can be 1
             model.AddExactlyOne(assignment_possibilities)
